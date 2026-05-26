@@ -1,0 +1,37 @@
+[Unit]
+Description=Roost — web (FastAPI + Jinja2)
+Documentation=https://github.com/crazyguy106/roost
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=roost
+Group=roost
+WorkingDirectory=/opt/roost
+EnvironmentFile=/etc/roost/roost.env
+ExecStart=/opt/roost/.venv/bin/roost-web
+Restart=on-failure
+RestartSec=3s
+
+# Hardening — bare-metal version of the cap_drop block in the Docker stack.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+# Read-write paths the app actually needs.
+ReadWritePaths=/opt/roost/data /opt/roost/logs /var/lib/roost
+
+# Logging — goes to the journal. View with: journalctl -u roost-web -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

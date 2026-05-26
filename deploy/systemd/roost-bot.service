@@ -1,0 +1,35 @@
+[Unit]
+Description=Roost — Telegram bot
+Documentation=https://github.com/crazyguy106/roost
+After=network-online.target roost-web.service
+Wants=network-online.target
+# Optional companion to roost-web. Enable only if TELEGRAM_BOT_TOKEN is set.
+
+[Service]
+Type=simple
+User=roost
+Group=roost
+WorkingDirectory=/opt/roost
+EnvironmentFile=/etc/roost/roost.env
+ExecStart=/opt/roost/.venv/bin/roost-bot
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+ReadWritePaths=/opt/roost/data /opt/roost/logs /var/lib/roost
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,37 @@
+# Roost — host-Caddy config for the bare-metal install.
+#
+# Reads ROOST_DOMAIN and ROOST_ADMIN_EMAIL from /etc/default/caddy.
+# install.sh writes those automatically.
+
+{
+    email {$ROOST_ADMIN_EMAIL}
+}
+
+{$ROOST_DOMAIN} {
+    encode zstd gzip
+
+    # Reverse-proxy to roost-web on loopback.
+    # WebSocket upgrades (chromium devtools CDP via /sidecar) need to be
+    # passed through unchanged. Caddy handles this automatically;
+    # generous timeouts because RPA flows can idle for minutes during
+    # Singpass / payment steps.
+    reverse_proxy 127.0.0.1:8080 {
+        flush_interval -1
+        transport http {
+            read_timeout  600s
+            write_timeout 600s
+        }
+    }
+
+    # Defence-in-depth headers. Roost ships its own SecurityHeadersMiddleware
+    # already; these are belt-and-suspenders.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    }
+
+    # Logs go to the journal via Caddy's default systemd journal driver.
+    # tail with: journalctl -u caddy -f
+}
