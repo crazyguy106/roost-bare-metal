@@ -32,6 +32,8 @@ ROOST_BARE_REPO_URL="${ROOST_BARE_REPO_URL:-https://github.com/crazyguy106/roost
 ROOST_INSTALL_DIR="${ROOST_INSTALL_DIR:-/opt/roost}"
 ROOST_BARE_DIR="${ROOST_BARE_DIR:-/opt/roost-bare-metal}"
 ROOST_USER="${ROOST_USER:-roost}"
+WEB_PORT="${WEB_PORT:-8080}"
+SKIP_CADDY="${SKIP_CADDY:-0}"
 
 # Locate this install.sh — either we're running from a clone, or we cloned
 # ourselves above. Either way, we need deploy/systemd/*.service and
@@ -104,6 +106,12 @@ sudo -u "$ROOST_USER" bash -c "
   source .venv/bin/activate
   pip install --quiet --upgrade pip
   pip install --quiet -r requirements/base.txt
+  # AI deps are required by roost.web.app's import chain (api_agentic →
+  # planner → gemini_agent imports google.genai unconditionally). Install
+  # them alongside base so the web tier boots.
+  if [[ -f requirements/ai.txt ]]; then
+    pip install --quiet -r requirements/ai.txt
+  fi
   if [[ -n '${TELEGRAM_BOT_TOKEN:-}' ]] || [[ -f requirements/telegram.txt ]]; then
     pip install --quiet -r requirements/telegram.txt
   fi
@@ -121,7 +129,7 @@ if [[ ! -f /etc/roost/roost.env ]]; then
 
 # Web binds to loopback; Caddy fronts it on $ROOST_DOMAIN.
 WEB_HOST=127.0.0.1
-WEB_PORT=8080
+WEB_PORT=$WEB_PORT
 
 # Session secret — DO NOT use this default in production.
 SESSION_SECRET=$(head -c 32 /dev/urandom | base64 | tr -d '=+/' | head -c 32)
@@ -171,13 +179,19 @@ systemctl daemon-reload
 
 # ── 8. Caddy ─────────────────────────────────────────────────────────
 # Docker equivalent: the caddy container in docker-compose.public.yml.
-echo "==> Installing Caddyfile"
-install -m 0644 "$HERE/deploy/caddy/Caddyfile" /etc/caddy/Caddyfile
-cat > /etc/default/caddy <<EOF
+# Skip with SKIP_CADDY=1 (useful for sandbox testing where ports 80/443
+# are already taken by an existing reverse proxy or Docker stack).
+if [[ "$SKIP_CADDY" != "1" ]]; then
+  echo "==> Installing Caddyfile"
+  install -m 0644 "$HERE/deploy/caddy/Caddyfile" /etc/caddy/Caddyfile
+  cat > /etc/default/caddy <<EOF
 ROOST_DOMAIN=$ROOST_DOMAIN
 ROOST_ADMIN_EMAIL=$ROOST_ADMIN_EMAIL
 EOF
-systemctl restart caddy
+  systemctl restart caddy
+else
+  echo "==> Skipping Caddy install (SKIP_CADDY=1)"
+fi
 
 # ── 9. Start Roost ───────────────────────────────────────────────────
 # Docker equivalent: docker compose up -d roost
@@ -198,7 +212,11 @@ fi
 sleep 4
 echo ""
 echo "==> Health check"
-if curl -fsSL -o /dev/null -w "  https://$ROOST_DOMAIN/  HTTP %{http_code}\n" \
+if [[ "$SKIP_CADDY" == "1" ]]; then
+  curl -fsSL -o /dev/null -w "  http://127.0.0.1:$WEB_PORT/  HTTP %{http_code}\n" \
+       "http://127.0.0.1:$WEB_PORT/" 2>&1 || \
+       echo "  (loopback check failed — see: journalctl -u roost-web -n 30)"
+elif curl -fsSL -o /dev/null -w "  https://$ROOST_DOMAIN/  HTTP %{http_code}\n" \
        "https://$ROOST_DOMAIN/" 2>&1; then
   :
 else
@@ -209,7 +227,11 @@ fi
 echo ""
 echo "============================================================"
 echo "Roost is installed."
-echo "  Web:   https://$ROOST_DOMAIN/"
+if [[ "$SKIP_CADDY" == "1" ]]; then
+  echo "  Web:   http://127.0.0.1:$WEB_PORT/  (Caddy skipped)"
+else
+  echo "  Web:   https://$ROOST_DOMAIN/"
+fi
 echo "  Login: admin / $(grep ^WEB_PASSWORD= /etc/roost/roost.env | cut -d= -f2-)"
 echo "  Logs:  journalctl -u roost-web -f"
 echo "  Edit:  sudo nano /etc/roost/roost.env  &&  sudo systemctl restart roost-web"
